@@ -79,9 +79,10 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 	    line[strcspn(line, " ")] = '\0';
 
         /*
-         * Figure out what the match mechanism is. We have three examples so
+         * Figure out what the match mechanism is. We have four examples so
          *     i.   using /1 and /2
          *     ii.  using /f and /r
+	 *     iii. using ' 1...' and ' 2....'
          *     iii. just having the whole name
          *
          * If there is a /1 or /2 in the file name, we set that part to null so the string is only up
