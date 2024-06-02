@@ -57,6 +57,20 @@ after taking a peek at your files and making sure there are at least _some_ pair
 
 ## Installing fastq_pair
 
+We recommend installing fastq-pair using [bioconda](https://bioconda.github.io/recipes/fastq-pair/README.html)
+
+```
+mamba install -c bioconda fastq-pair
+```
+
+or in its own environment:
+
+```
+mamba create --name fastq-pair -c bioconda fastq-pair
+```
+
+### Installing from source
+
 To install the code, grab the github repository, then make a build directory:
 ```$xslt
 mkdir build && cd build
