@@ -1,5 +1,6 @@
 //
 // Created by redwards on 7/29/17.
+// Updated by f-huber on 09/05/24.
 //
 
 #ifndef CEEQLIB_INDEX_FASTQ_H
@@ -30,7 +31,9 @@ struct options {
     int tablesize;
     bool print_table_counts;
     bool verbose;
+    bool formatid;
     bool splitspace;
+    bool deduplicate;
 };
 
 // how long should our lines be. This is a 64k buffer

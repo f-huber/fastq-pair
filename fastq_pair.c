@@ -31,33 +31,136 @@
  *
  */
 
+#include "is_gzipped.h"
 #include "fastq_pair.h"
 #include "robstr.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>  // Include zlib for gzip handling
+
+// Function to remove any suffix from a predefined list of possible suffixes
+char* removeSuffix(const char* str) {
+    // Define the possible suffixes directly within the function
+    const char* suffixes[] = {".fastq", ".fastq.gz", ".fq", "fq.gz"};
+    int num_suffixes = sizeof(suffixes) / sizeof(suffixes[0]);
+
+    size_t str_len = strlen(str);
+
+    // Loop through all possible suffixes
+    for (int i = 0; i < num_suffixes; i++) {
+        size_t suffix_len = strlen(suffixes[i]);
+
+        // Check if the string ends with the current suffix
+        if (str_len >= suffix_len && strcmp(str + str_len - suffix_len, suffixes[i]) == 0) {
+            // Allocate memory for the new string (excluding the suffix)
+            char* new_str = (char*)malloc((str_len - suffix_len + 1) * sizeof(char));
+            if (new_str == NULL) {
+                fprintf(stderr, "Memory allocation failed\n");
+                exit(1);  // Exit if memory allocation fails
+            }
+            // Copy the part of the original string excluding the suffix
+            strncpy(new_str, str, str_len - suffix_len);
+            new_str[str_len - suffix_len] = '\0';  // Null-terminate the new string
+            return new_str;
+        }
+    }
+    // If no suffix to remove, return a copy of the original string
+    char* new_str = strdup(str);
+    return new_str;
+}
+
+// Function to write to a regular file or gzip file depending on the flag
+void writeToFile(bool is_gzip, gzFile gz_file, FILE* reg_file, const char* line) {
+    if (is_gzip) {
+        gzprintf(gz_file, "%s", line);  // Write to gzip file
+    } else {
+        fprintf(reg_file, "%s", line);  // Write to regular file
+    }
+}
+
+// Function to read a line from either a regular or gzip file
+char* readFromFile(bool is_gzip, gzFile gz_file, FILE* reg_file, char* line, int max_len) {
+    if (is_gzip) {
+        return gzgets(gz_file, line, max_len);  // Read from gzip file
+    } else {
+        return fgets(line, max_len, reg_file);  // Read from regular file
+    }
+}
+
+// Void function to seek in either a regular or gzip file
+void seekInFile(bool is_gzip, gzFile gz_file, FILE* reg_file, long offset, int whence) {
+    if (is_gzip) {
+        gzseek(gz_file, offset, whence);  // Seek in gzip file
+    } else {
+        fseek(reg_file, offset, whence);  // Seek in regular file
+    }
+}
+
+// Function to get the current position in either a regular or gzip file
+long int tellInFile(bool is_gzip, gzFile gz_file, FILE* reg_file) {
+    if (is_gzip) {
+        return gztell(gz_file);  // Get position in gzip file
+    } else {
+        return ftell(reg_file);  // Get position in regular file
+    }
+}
 
 int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
-    // our hash for the fastq ids.
-    struct idloc **ids;
-    ids = malloc(sizeof(*ids) * opt->tablesize);
+    int left_duplicates_counter=0;
+    int right_duplicates_counter=0;
+    int left_paired_counter=0;
+    int right_paired_counter=0;
+    int left_single_counter=0;
+    int right_single_counter=0;
 
-    // if we are not able to allocate the memory for this, there is no point continuing!
-    if (ids == NULL) {
-        fprintf(stderr, "We cannot allocate the memory for a table size of %d. Please try a smaller value for -t\n", opt->tablesize);
+    // Hash table for the first file (left)
+    struct idloc **ids_left;
+    ids_left = malloc(sizeof(*ids_left) * opt->tablesize);
+    if (ids_left == NULL) {
+        fprintf(stderr, "We cannot allocate the memory for a table size of the first file %d. Please try a smaller value for -t\n", opt->tablesize);
         exit(-1);
     }
+    // Only allocate memory for ids_right if deduplication is used
+    struct idloc **ids_right;
+    if (opt->deduplicate) {
+        // Hash table for the first file (right)
+        ids_right = malloc(sizeof(*ids_right) * opt->tablesize);
+        if (ids_right == NULL) {
+            fprintf(stderr, "We cannot allocate the memory for a table size of the second file %d. Please try a smaller value for -t\n", opt->tablesize);
+            exit(-1);
+        }
+    }
 
-    FILE *lfp;
+    FILE *lfp, *rfp;
+    gzFile lfp_gz, rfp_gz;
+    bool is_gzip_left, is_gzip_right;
+    bool is_gzip_out = false;
+
+    is_gzip_left = test_gzip(left_fn);
+    is_gzip_right = test_gzip(right_fn);
+    if (is_gzip_left || is_gzip_right) {
+        is_gzip_out = true;
+    }
+
+    fprintf(stderr, "First file is gzipped: %s\n", is_gzip_left ? "true" : "false");
+    fprintf(stderr, "Second file is gzipped: %s\n", is_gzip_right ? "true" : "false");
+    fprintf(stderr, "Output files will be gzipped: %s\n", is_gzip_out ? "true" : "false");
 
     char *line = malloc(sizeof(char) * MAXLINELEN + 1);
 
-    if ((lfp = fopen(left_fn, "r")) == NULL) {
-        fprintf(stderr, "Can't open file %s\n", left_fn);
-        exit(1);
+    if (is_gzip_left){
+        if ((lfp_gz = gzopen(left_fn, "rb")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
+    } else {
+        if ((lfp = fopen(left_fn, "r")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
     }
-
     char *aline; /* this variable is not used, it suppresses a compiler warning */
 
     long int nextposition = 0;
@@ -65,12 +168,17 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
     /*
      * Read the first file and make an index of that file.
      */
-    while ((aline = fgets(line, MAXLINELEN, lfp)) != NULL) {
+    while (1) {
+        aline = readFromFile(is_gzip_left, lfp_gz, lfp, line, MAXLINELEN);
+        if (aline == NULL) {
+            break;  // End of file
+        }
+
         struct idloc *newid;
         newid = (struct idloc *) malloc(sizeof(*newid));
 
         if (newid == NULL) {
-            fprintf(stderr, "Can't allocate memory for new ID pointer\n");
+            fprintf(stderr, "Can't allocate memory for new ID pointer - first file\n");
             return 0;
         }
 
@@ -82,7 +190,7 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
          * Figure out what the match mechanism is. We have four examples so
          *     i.   using /1 and /2
          *     ii.  using /f and /r
-	 *     iii. using ' 1...' and ' 2....'
+	     *     iii. using ' 1...' and ' 2....'
          *     iii. just having the whole name
          *
          * If there is a /1 or /2 in the file name, we set that part to null so the string is only up
@@ -96,22 +204,44 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
                 line[strlen(line)-1] = '\0';
 
         if (opt->verbose)
-            fprintf(stderr, "ID is |%s|\n", line);
+            fprintf(stderr, "ID first file is |%s|\n", line);
 
-        newid->id = dupstr(line);
-        newid->pos = nextposition;
-        newid->printed = false;
-        newid->next = NULL;
+        // Hash the ID
+        unsigned hashval = hash(line) % opt->tablesize;
 
-        unsigned hashval = hash(newid->id) % opt->tablesize;
-        newid->next = ids[hashval];
-        ids[hashval] = newid;
+        // Check if the ID already exists in the hash table (duplicate)
+        if (opt->deduplicate) {
+            struct idloc *existing = ids_left[hashval];
+            while (existing != NULL) {
+                if (strcmp(existing->id, line) == 0) {
+                    // ID already exists, do not add it again
+                    if (opt->verbose)
+                        fprintf(stderr, "Duplicate ID found in the first file, skipping: %s\n", line);
+                        left_duplicates_counter++;
+                    free(newid);  // Free the memory we allocated for newid
+                    newid = NULL;
+                    break;
+                }
+                existing = existing->next;
+            }
+        }
+
+
+        if (newid != NULL) {
+            // If the ID is not a duplicate, proceed with adding it to the hash table
+            newid->id = dupstr(line);
+            newid->pos = nextposition;
+            newid->printed = false;
+            newid->next = ids_left[hashval];  // Insert at the head of the list
+            ids_left[hashval] = newid;
+        }
 
         /* read the next three lines and ignore them: sequence, header, and quality */
         for (int i=0; i<3; i++)
-            aline = fgets(line, MAXLINELEN, lfp);
+            aline = readFromFile(is_gzip_left, lfp_gz, lfp, line, MAXLINELEN);
 
-        nextposition = ftell(lfp);
+        // Get the current position using tellInFile
+        nextposition = tellInFile(is_gzip_left, lfp_gz, lfp);
     }
 
 
@@ -123,7 +253,7 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
         fprintf(stdout, "Bucket sizes\n");
 
         for (int i = 0; i < opt->tablesize; i++) {
-            struct idloc *ptr = ids[i];
+            struct idloc *ptr = ids_left[i];
             int counter=0;
             while (ptr != NULL) {
                 // fprintf(stdout, "ID: %s Position %ld\n", ptr->id, ptr->pos);
@@ -136,64 +266,106 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
    /* now we want to open output files for left_paired, right_paired, and right_single */
 
-    FILE * left_paired;
-    FILE * left_single;
-    FILE * right_paired;
-    FILE * right_single;
+    FILE *left_paired, *left_single, *right_paired, *right_single;
+    gzFile left_paired_gz, left_single_gz, right_paired_gz, right_single_gz;
 
-    char *lpfn = catstr(dupstr(left_fn), ".paired.fq");
-    char *rpfn = catstr(dupstr(right_fn), ".paired.fq");
-    char *lsfn = catstr(dupstr(left_fn), ".single.fq");
-    char *rsfn = catstr(dupstr(right_fn), ".single.fq");
 
-    printf("Writing the paired reads to %s and %s.\nWriting the single reads to %s and %s\n", lpfn, rpfn, lsfn, rsfn);
-
-    if ((left_paired = fopen(lpfn, "w")) == NULL ) {
-        fprintf(stderr, "Can't open file %s\n", lpfn);
-        exit(1);
+    char *lpfn, *rpfn, *lsfn, *rsfn;
+    if (is_gzip_out) {
+        lpfn = catstr(removeSuffix(left_fn), ".paired.fastq.gz");
+        rpfn = catstr(removeSuffix(right_fn), ".paired.fastq.gz");
+        lsfn = catstr(removeSuffix(left_fn), ".single.fastq.gz");
+        rsfn = catstr(removeSuffix(right_fn), ".single.fastq.gz");
+    } else {
+        lpfn = catstr(removeSuffix(left_fn), ".paired.fastq");
+        rpfn = catstr(removeSuffix(right_fn), ".paired.fastq");
+        lsfn = catstr(removeSuffix(left_fn), ".single.fastq");
+        rsfn = catstr(removeSuffix(right_fn), ".single.fastq");
     }
 
-    if ((left_single = fopen(lsfn, "w")) == NULL) {
-        fprintf(stderr, "Can't open file %s\n", lsfn);
-        exit(1);
+    printf("Writing the paired reads to %s and %s\nWriting the single reads to %s and %s\n", lpfn, rpfn, lsfn, rsfn);
+
+    // Create output files
+    if (is_gzip_out){
+        if ((left_paired_gz = gzopen(lpfn, "wb")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", lpfn);
+                exit(1);
+        }
+
+        if ((left_single_gz = gzopen(lsfn, "wb")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", lsfn);
+            exit(1);
+        }
+
+        if ((right_paired_gz = gzopen(rpfn, "wb")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", rpfn);
+            exit(1);
+        }
+
+        if ((right_single_gz = gzopen(rsfn, "wb")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", rsfn);
+            exit(1);
+        }    
+
+    } else {
+        if ((left_paired = fopen(lpfn, "w")) == NULL ) {
+            fprintf(stderr, "Can't open file %s\n", lpfn);
+            exit(1);
+        }
+
+        if ((left_single = fopen(lsfn, "w")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", lsfn);
+            exit(1);
+        }
+
+        if ((right_paired = fopen(rpfn, "w")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", rpfn);
+            exit(1);
+        }
+
+        if ((right_single = fopen(rsfn, "w")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", rsfn);
+            exit(1);
+        }        
     }
-    if ((right_paired = fopen(rpfn, "w")) == NULL) {
-        fprintf(stderr, "Can't open file %s\n", rpfn);
-        exit(1);
-    }
-
-    if ((right_single = fopen(rsfn, "w")) == NULL) {
-        fprintf(stderr, "Can't open file %s\n", rsfn);
-        exit(1);
-    }
-
-
-
     /*
     * Now read the second file, and print out things in common
     */
 
-    int left_paired_counter=0;
-    int right_paired_counter=0;
-    int left_single_counter=0;
-    int right_single_counter=0;
-
-    FILE *rfp;
-
-    if ((rfp = fopen(right_fn, "r")) == NULL) {
-        fprintf(stderr, "Can't open file %s\n", left_fn);
-        exit(1);
+    if (is_gzip_right){
+        if ((rfp_gz = gzopen(right_fn, "rb")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
+    } else {
+        if ((rfp = fopen(right_fn, "r")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
     }
 
     nextposition = 0;
 
-    while ((aline = fgets(line, MAXLINELEN, rfp)) != NULL) {
+    while (1) {
+        aline = readFromFile(is_gzip_right, rfp_gz, rfp, line, MAXLINELEN);
+
+        if (aline == NULL) {
+            break;  // End of file
+        }
+
+        struct idloc *newid;
+        newid = (struct idloc *) malloc(sizeof(*newid));
+
+        if (newid == NULL) {
+            fprintf(stderr, "Can't allocate memory for new ID pointer - second file\n");
+            return 0;
+        }
 
         // make a copy of the current line so we can print it out later.
         char *headerline = dupstr(line);
 
         line[strcspn(line, "\n")] = '\0';
-	if (opt->splitspace)
+        if (opt->splitspace)
             line[strcspn(line, " ")] = '\0';
 
         /* remove the last character, as we did above */
@@ -204,41 +376,93 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
             if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar)
                 line[strlen(line)-1] = '\0';
 
-        // now see if we have the mate pair
+        if (opt->verbose)
+            fprintf(stderr, "ID second file is |%s|\n", line);
+
+        // Hash the ID
         unsigned hashval = hash(line) % opt->tablesize;
-        struct idloc *ptr = ids[hashval];
-        long int posn = -1; // -1 is not a valid file position
-        while (ptr != NULL) {
-            if (strcmp(ptr->id, line) == 0) {
-                posn = ptr->pos;
-                ptr->printed = true;
+
+        // Store the current identifier outside of the line variable
+        char * entryid = dupstr(line);
+
+        // Check if the ID already exists in the hash table (duplicate)
+        if (opt->deduplicate) {
+            struct idloc *existing = ids_right[hashval];
+            while (existing != NULL) {
+                if (strcmp(existing->id, line) == 0) {
+                    // ID already exists, do not add it again
+                    if (opt->verbose)
+                        fprintf(stderr, "Duplicate ID found in the second file, skipping: %s\n", line);
+                        right_duplicates_counter++;
+                    free(newid);  // Free the memory we allocated for newid
+                    newid = NULL;
+                    break;
+                }
+                existing = existing->next;
             }
-            ptr = ptr->next;
         }
 
-        if (posn != -1) {
-            // we have a match.
-            // lets process the left file
-            fseek(lfp, posn, SEEK_SET);
-            left_paired_counter++;
-            for (int i=0; i<=3; i++) {
-                aline = fgets(line, MAXLINELEN, lfp);
-                fprintf(left_paired, "%s", line);
+        if (newid != NULL) {
+            if (opt->deduplicate) {
+                // If the ID is not a duplicate, proceed with adding it to the hash table of the second file
+                newid->id = dupstr(line);
+                newid->pos = nextposition;
+                newid->printed = false;
+                newid->next = ids_right[hashval];  // Insert at the head of the list
+                ids_right[hashval] = newid;
             }
-            // now process the right file
-            fprintf(right_paired, "%s", headerline);
-            right_paired_counter++;
-            for (int i=0; i<=2; i++) {
-                aline = fgets(line, MAXLINELEN, rfp);
-                fprintf(right_paired, "%s", line);
+            // now see if we have the mate pair
+            unsigned hashval = hash(line) % opt->tablesize;
+            struct idloc *ptr = ids_left[hashval];
+            long int posn = -1; // -1 is not a valid file position
+            while (ptr != NULL) {
+                if (strcmp(ptr->id, line) == 0) {
+                    posn = ptr->pos;
+                    ptr->printed = true;
+                }
+                ptr = ptr->next;
             }
-        }
-        else {
-            fprintf(right_single, "%s", headerline);
-            right_single_counter++;
+
+            if (posn != -1) {
+                // we have a match.
+                // lets process the left file
+                seekInFile(is_gzip_left, lfp_gz, lfp, posn, SEEK_SET);
+                left_paired_counter++;
+                for (int i=0; i<=3; i++) {
+                    aline = readFromFile(is_gzip_left, lfp_gz, lfp, line, MAXLINELEN);
+                    if (i == 0 && opt->formatid) {
+                        writeToFile(is_gzip_out, left_paired_gz, left_paired, catstr(entryid, "1\n"));
+                    } else {
+                        writeToFile(is_gzip_out, left_paired_gz, left_paired, line);
+                    }
+                }
+                // now process the right file
+                if (opt->formatid) {
+                    writeToFile(is_gzip_out, right_paired_gz, right_paired, catstr(entryid, "2\n"));
+                } else {
+                    writeToFile(is_gzip_out, right_paired_gz, right_paired, headerline);
+                }
+                right_paired_counter++;
+                for (int i=0; i<=2; i++) {
+                    aline = readFromFile(is_gzip_right, rfp_gz, rfp, line, MAXLINELEN);
+                    writeToFile(is_gzip_out, right_paired_gz, right_paired, line);
+                }
+            }
+            else {
+                if (opt->formatid) {
+                    writeToFile(is_gzip_out, right_single_gz, right_single, catstr(entryid, "2\n"));
+                } else {
+                    writeToFile(is_gzip_out, right_single_gz, right_single, headerline);
+                }
+                right_single_counter++;
+                for (int i=0; i<=2; i++) {
+                    aline = readFromFile(is_gzip_right, rfp_gz, rfp, line, MAXLINELEN);
+                    writeToFile(is_gzip_out, right_single_gz, right_single, line);
+                }
+            }
+        } else {
             for (int i=0; i<=2; i++) {
-                aline = fgets(line, MAXLINELEN, rfp);
-                fprintf(right_single, "%s", line);
+                aline = readFromFile(is_gzip_right, rfp_gz, rfp, line, MAXLINELEN);
             }
         }
     }
@@ -246,25 +470,54 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
     /* all that remains is to print the unprinted singles from the left file */
 
     for (int i = 0; i < opt->tablesize; i++) {
-        struct idloc *ptr = ids[i];
+        struct idloc *ptr = ids_left[i];
         while (ptr != NULL) {
             if (! ptr->printed) {
-                fseek(lfp, ptr->pos, SEEK_SET);
+                seekInFile(is_gzip_left, lfp_gz, lfp, ptr->pos, SEEK_SET);
                 left_single_counter++;
                 for (int n=0; n<=3; n++) {
-                    aline = fgets(line, MAXLINELEN, lfp);
-                    fprintf(left_single, "%s", line);
+                    aline = readFromFile(is_gzip_left, lfp_gz, lfp, line, MAXLINELEN);
+                    if (i == 0 && opt->formatid) {
+                        writeToFile(is_gzip_out, left_single_gz, left_single, catstr(ptr->id, "1\n"));
+                    } else {
+                        writeToFile(is_gzip_out, left_single_gz, left_single, line);
+                    }
                 }
             }
             ptr = ptr->next;
         }
     }
 
-    fprintf(stderr, "Left paired: %d\t\tRight paired: %d\nLeft single: %d\t\tRight single: %d\n",
+    fprintf(stdout, "Left paired: %-14d Right paired: %d \nLeft single: %-14d Right single: %d\n",
             left_paired_counter, right_paired_counter, left_single_counter, right_single_counter);
+    if (opt->deduplicate) {
+        fprintf(stdout, "Left duplicates: %-10d Right duplicates: %d\n",
+                left_duplicates_counter, right_duplicates_counter);
+    }
 
-    fclose(lfp);
-    fclose(rfp);
+    if (is_gzip_left) {
+        gzclose(lfp_gz);
+    } else {
+        fclose(lfp);
+    }
+
+    if (is_gzip_right) {
+        gzclose(rfp_gz);
+    } else {
+        fclose(rfp);
+    }
+
+    if (is_gzip_out) {
+        gzclose(left_paired_gz);
+        gzclose(left_single_gz);
+        gzclose(right_paired_gz);
+        gzclose(right_single_gz);
+    } else {
+        fclose(left_paired);
+        fclose(left_single);
+        fclose(right_paired);
+        fclose(right_single);
+    }
 
     /*
      * Free up the memory for all the pointers
@@ -272,7 +525,7 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
 
     for (int i = 0; i < opt->tablesize; i++) {
-        struct idloc *ptr = ids[i];
+        struct idloc *ptr = ids_left[i];
         struct idloc *next;
         while (ptr != NULL) {
             next = ptr->next;
@@ -281,8 +534,21 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
         }
     }
 
-    free(ids);
+    free(ids_left);
     free(line);
+
+    if (opt->deduplicate) {
+        for (int i = 0; i < opt->tablesize; i++) {
+            struct idloc *ptr = ids_right[i];
+            struct idloc *next;
+            while (ptr != NULL) {
+                next = ptr->next;
+                free(ptr);
+                ptr=next;
+            }
+        }
+        free(ids_right);
+    }
 
     return 0;
 }

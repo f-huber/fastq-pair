@@ -1,5 +1,4 @@
 #include "fastq_pair.h"
-#include "is_gzipped.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -32,6 +31,8 @@ int main(int argc, char* argv[]) {
     struct options *opt;
     opt = malloc(sizeof(struct options));
 
+    opt->deduplicate = false;
+    opt->formatid = false;
     opt->splitspace = true;
     opt->tablesize = 100003;
     opt->print_table_counts = false;
@@ -47,6 +48,10 @@ int main(int argc, char* argv[]) {
             opt->tablesize = atoi(argv[++i]);
         else if (strcmp(argv[i], "-p") == 0)
             opt->print_table_counts = true;
+        else if (strcmp(argv[i], "-d") == 0)
+            opt->deduplicate = true;
+        else if (strcmp(argv[i], "-f") == 0)
+            opt->formatid = true;
         else if (strcmp(argv[i], "-s") == 0)
             opt->verbose = false;
         else if (strcmp(argv[i], "-v") == 0)
@@ -65,15 +70,6 @@ int main(int argc, char* argv[]) {
         exit(-1);
     }
 
-    //if (test_gzip(left_file) || test_gzip(right_file)) {
-    if (test_gzip(left_file) || test_gzip(right_file)) {
-        fprintf(stderr, "ERROR: It appears that your files are compressed with gzip.\n");
-        fprintf(stderr, "At this time we can't handle gzipped files because we use random access reading of the data stream.\n");
-        fprintf(stderr, "Please either uncompress the files, or check these alternatives: https://edwards.sdsu.edu/research/sorting-and-paring-fastq-files/\n");
-        exit(-1);
-    }
-
-
     long long start_time, end_time, overhead_time;
     start_time = get_time_ms();
     end_time = get_time_ms();
@@ -91,7 +87,9 @@ int main(int argc, char* argv[]) {
 void help(char *s) {
     fprintf(stdout, "\n%s [options] [fastq file 1] [fastq file 2]\n", s);
     fprintf(stdout, "\nOPTIONS\n");
-    fprintf(stdout, "-s do not split sequence IDs on spaces. See issue #14 for more details");
+    fprintf(stdout, "-f reformat sequence identifiers to minimal identifiers in both files (should not be used with -s option)\n");
+    fprintf(stdout, "-s do not split sequence IDs on spaces. See issue #14 for more details (should not be used with -f option)");
+    fprintf(stdout, "-d remove duplicate sequences (based on the identifiers). Note that this will double the amount of memory required\n");
     fprintf(stdout, "-t table size (default 100003)\n");
     fprintf(stdout, "-p print the number of elements in each bucket in the table\n");
     fprintf(stdout, "-v verbose output. This is mainly for debugging\n");
