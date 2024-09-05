@@ -88,7 +88,7 @@ void help(char *s) {
     fprintf(stdout, "\n%s [options] [fastq file 1] [fastq file 2]\n", s);
     fprintf(stdout, "\nOPTIONS\n");
     fprintf(stdout, "-f reformat sequence identifiers to minimal identifiers in both files (should not be used with -s option)\n");
-    fprintf(stdout, "-s do not split sequence IDs on spaces. See issue #14 for more details (should not be used with -f option)");
+    fprintf(stdout, "-s do not split sequence IDs on spaces. See issue #14 for more details (should not be used with -f option)\n");
     fprintf(stdout, "-d remove duplicate sequences (based on the identifiers). Note that this will double the amount of memory required\n");
     fprintf(stdout, "-t table size (default 100003)\n");
     fprintf(stdout, "-p print the number of elements in each bucket in the table\n");

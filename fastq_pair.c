@@ -183,8 +183,8 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
         }
 
         line[strcspn(line, "\n")] = '\0';
-	if (opt->splitspace)
-	    line[strcspn(line, " ")] = '\0';
+        if (opt->splitspace)
+            line[strcspn(line, " \t")] = '\0';
 
         /*
          * Figure out what the match mechanism is. We have four examples so
@@ -199,9 +199,14 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
         char lastchar = line[strlen(line)-1];
         char lastbutone = line[strlen(line)-2];
-        if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone)
-            if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar)
-                line[strlen(line)-1] = '\0';
+        if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
+            if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
+                line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
+            }
+        } else {
+            line[strlen(line)+1] = '\0';
+            line[strlen(line)-1] = '/';
+        }
 
         if (opt->verbose)
             fprintf(stderr, "ID first file is |%s|\n", line);
@@ -366,15 +371,19 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
         line[strcspn(line, "\n")] = '\0';
         if (opt->splitspace)
-            line[strcspn(line, " ")] = '\0';
+            line[strcspn(line, " \t")] = '\0';
 
         /* remove the last character, as we did above */
-
         char lastchar = line[strlen(line)-1];
         char lastbutone = line[strlen(line)-2];
-        if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone)
-            if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar)
-                line[strlen(line)-1] = '\0';
+        if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
+            if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
+                line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
+            }
+        } else {
+            line[strlen(line)+1] = '\0';
+            line[strlen(line)-1] = '/';
+        }
 
         if (opt->verbose)
             fprintf(stderr, "ID second file is |%s|\n", line);
@@ -477,7 +486,7 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
                 left_single_counter++;
                 for (int n=0; n<=3; n++) {
                     aline = readFromFile(is_gzip_left, lfp_gz, lfp, line, MAXLINELEN);
-                    if (i == 0 && opt->formatid) {
+                    if (n == 0 && opt->formatid) {
                         writeToFile(is_gzip_out, left_single_gz, left_single, catstr(ptr->id, "1\n"));
                     } else {
                         writeToFile(is_gzip_out, left_single_gz, left_single, line);
