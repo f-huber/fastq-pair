@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
         else if (strcmp(argv[i], "-f") == 0)
             opt->formatid = true;
         else if (strcmp(argv[i], "-s") == 0)
-            opt->verbose = false;
+            opt->splitspace = false;
         else if (strcmp(argv[i], "-v") == 0)
             opt->verbose = true;
         else if (access(argv[i], F_OK) != -1 && left_file == NULL)
