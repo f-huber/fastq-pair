@@ -199,14 +199,6 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
         char lastchar = line[strlen(line)-1];
         char lastbutone = line[strlen(line)-2];
-        // if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
-        //     if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
-        //         line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
-        //     }
-        // } else {
-        //     line[strlen(line)+1] = '\0';
-        //     line[strlen(line)-1] = '/';
-        // }
 
         if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
             if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
@@ -353,12 +345,12 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
     if (is_gzip_right){
         if ((rfp_gz = gzopen(right_fn, "rb")) == NULL) {
-                fprintf(stderr, "Can't open file %s\n", left_fn);
+                fprintf(stderr, "Can't open file %s\n", right_fn);
                 exit(1);
         }
     } else {
         if ((rfp = fopen(right_fn, "r")) == NULL) {
-                fprintf(stderr, "Can't open file %s\n", left_fn);
+                fprintf(stderr, "Can't open file %s\n", right_fn);
                 exit(1);
         }
     }
@@ -576,6 +568,236 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
         }
         free(ids_right);
     }
+
+    return 0;
+}
+
+#include "is_gzipped.h"
+#include "fastq_pair.h"
+#include "robstr.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <zlib.h>  // For handling gzip files
+
+int reformat_headers(char *left_fn, char *right_fn, struct options *opt) {
+    FILE *lfp, *rfp;
+    gzFile lfp_gz, rfp_gz;
+    bool is_gzip_left, is_gzip_right;
+    bool is_gzip_out = false;
+
+    is_gzip_left = test_gzip(left_fn);
+    is_gzip_right = test_gzip(right_fn);
+    if (is_gzip_left || is_gzip_right) {
+        is_gzip_out = true;
+    }
+
+    fprintf(stderr, "First file is gzipped: %s\n", is_gzip_left ? "true" : "false");
+    fprintf(stderr, "Second file is gzipped: %s\n", is_gzip_right ? "true" : "false");
+    fprintf(stderr, "Output files will be gzipped: %s\n", is_gzip_out ? "true" : "false");
+
+    char *line = malloc(sizeof(char) * MAXLINELEN + 1);
+
+    if (is_gzip_left){
+        if ((lfp_gz = gzopen(left_fn, "rb")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
+    } else {
+        if ((lfp = fopen(left_fn, "r")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
+    }
+    char *aline; /* this variable is not used, it suppresses a compiler warning */
+
+   /* now we want to open output files for left_formatted and right_formatted */
+
+    FILE *left_formatted, *right_formatted;
+    gzFile left_formatted_gz, right_formatted_gz;
+
+    char *lffn, *rffn, *lsfn;
+    if (is_gzip_out) {
+        lffn = catstr(removeSuffix(left_fn), ".formatted.fastq.gz");
+        rffn = catstr(removeSuffix(right_fn), ".formatted.fastq.gz");
+    } else {
+        lffn = catstr(removeSuffix(left_fn), ".formatted.fastq");
+        rffn = catstr(removeSuffix(right_fn), ".formatted.fastq");
+    }
+
+    printf("Writing the paired reads to %s and %s\n", lffn, rffn);
+
+    // Create output files
+    if (is_gzip_out){
+        if ((left_formatted_gz = gzopen(lffn, "wb")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", lffn);
+                exit(1);
+        }
+
+        if ((right_formatted_gz = gzopen(rffn, "wb")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", rffn);
+            exit(1);
+        }
+
+    } else {
+        if ((left_formatted = fopen(lffn, "w")) == NULL ) {
+            fprintf(stderr, "Can't open file %s\n", lffn);
+            exit(1);
+        }
+
+        if ((right_formatted = fopen(rffn, "w")) == NULL) {
+            fprintf(stderr, "Can't open file %s\n", rffn);
+            exit(1);
+        }
+
+    }
+
+    /*
+    * Now read the first file, and print out reformatted headers
+    */
+    if (is_gzip_left){
+        if ((lfp_gz = gzopen(left_fn, "rb")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
+    } else {
+        if ((lfp = fopen(left_fn, "r")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", left_fn);
+                exit(1);
+        }
+    }
+
+    while (1) {
+        aline = readFromFile(is_gzip_left, lfp_gz, lfp, line, MAXLINELEN);
+
+        if (aline == NULL) {
+            break;  // End of file
+        }
+
+        struct idloc *newid;
+        newid = (struct idloc *) malloc(sizeof(*newid));
+
+        if (newid == NULL) {
+            fprintf(stderr, "Can't allocate memory for new ID pointer - second file\n");
+            return 0;
+        }
+
+        line[strcspn(line, "\n")] = '\0';
+        if (opt->splitspace)
+            line[strcspn(line, " \t")] = '\0';
+
+        /* remove the last character, as we did above */
+        char lastchar = line[strlen(line)-1];
+        char lastbutone = line[strlen(line)-2];
+        if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
+            if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
+                line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
+            }
+        } else if (opt->splitspace){
+            size_t len = strlen(line);
+            line[len + 1] = '\0';
+            line[len] = '/';
+        } else {
+            line[strlen(line)+1] = '\0';
+            line[strlen(line)-1] = '/';
+        }
+
+        if (opt->verbose)
+            fprintf(stderr, "ID second file is |%s|\n", line);
+
+        // Store the current identifier outside of the line variable
+        char * entryid = dupstr(line);
+
+        writeToFile(is_gzip_out, left_formatted_gz, left_formatted, catstr(entryid, "1\n"));
+        for (int i=0; i<=2; i++) {
+            aline = readFromFile(is_gzip_left, lfp_gz, lfp, line, MAXLINELEN);
+            writeToFile(is_gzip_out, left_formatted_gz, left_formatted, line);
+        }
+    }
+
+    /*
+    * Now read the first file, and print out reformatted headers
+    */
+    if (is_gzip_right){
+        if ((rfp_gz = gzopen(right_fn, "rb")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", right_fn);
+                exit(1);
+        }
+    } else {
+        if ((rfp = fopen(right_fn, "r")) == NULL) {
+                fprintf(stderr, "Can't open file %s\n", right_fn);
+                exit(1);
+        }
+    }
+
+    while (1) {
+        aline = readFromFile(is_gzip_right, rfp_gz, rfp, line, MAXLINELEN);
+
+        if (aline == NULL) {
+            break;  // End of file
+        }
+
+        struct idloc *newid;
+        newid = (struct idloc *) malloc(sizeof(*newid));
+
+        if (newid == NULL) {
+            fprintf(stderr, "Can't allocate memory for new ID pointer - second file\n");
+            return 0;
+        }
+
+        line[strcspn(line, "\n")] = '\0';
+        if (opt->splitspace)
+            line[strcspn(line, " \t")] = '\0';
+
+        /* remove the last character, as we did above */
+        char lastchar = line[strlen(line)-1];
+        char lastbutone = line[strlen(line)-2];
+        if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
+            if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
+                line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
+            }
+        } else if (opt->splitspace){
+            size_t len = strlen(line);
+            line[len + 1] = '\0';
+            line[len] = '/';
+        } else {
+            line[strlen(line)+1] = '\0';
+            line[strlen(line)-1] = '/';
+        }
+
+        if (opt->verbose)
+            fprintf(stderr, "ID second file is |%s|\n", line);
+
+        // Store the current identifier outside of the line variable
+        char * entryid = dupstr(line);
+
+        writeToFile(is_gzip_out, right_formatted_gz, right_formatted, catstr(entryid, "2\n"));
+        for (int i=0; i<=2; i++) {
+            aline = readFromFile(is_gzip_right, rfp_gz, rfp, line, MAXLINELEN);
+            writeToFile(is_gzip_out, right_formatted_gz, right_formatted, line);
+        }
+    }
+
+    if (is_gzip_left) {
+        gzclose(lfp_gz);
+    } else {
+        fclose(lfp);
+    }
+
+    if (is_gzip_right) {
+        gzclose(rfp_gz);
+    } else {
+        fclose(rfp);
+    }
+
+    if (is_gzip_out) {
+        gzclose(left_formatted_gz);
+        gzclose(right_formatted_gz);
+    } else {
+        fclose(left_formatted);
+        fclose(right_formatted);
+    }
+
 
     return 0;
 }

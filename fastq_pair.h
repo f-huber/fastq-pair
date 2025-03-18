@@ -31,6 +31,7 @@ struct options {
     int tablesize;
     bool print_table_counts;
     bool verbose;
+    bool headersonly;
     bool formatid;
     bool splitspace;
     bool deduplicate;
@@ -57,5 +58,6 @@ unsigned hash (char *s);
  * t is the tablesize and is the most important parameter
  */
 int pair_files(char *f, char *g, struct options *o);
+int reformat_headers(char *f, char *g, struct options *o);
 
 #endif //CEEQLIB_INDEX_FASTQ_H

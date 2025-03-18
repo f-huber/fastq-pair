@@ -33,6 +33,7 @@ int main(int argc, char* argv[]) {
 
     opt->deduplicate = false;
     opt->formatid = false;
+    opt->headersonly = false;
     opt->splitspace = true;
     opt->tablesize = 100003;
     opt->print_table_counts = false;
@@ -52,6 +53,10 @@ int main(int argc, char* argv[]) {
             opt->deduplicate = true;
         else if (strcmp(argv[i], "-f") == 0)
             opt->formatid = true;
+        else if (strcmp(argv[i], "-h") == 0){
+            opt->formatid = true;
+            opt->headersonly = true;            
+        }
         else if (strcmp(argv[i], "-s") == 0)
             opt->splitspace = false;
         else if (strcmp(argv[i], "-v") == 0)
@@ -74,9 +79,14 @@ int main(int argc, char* argv[]) {
     start_time = get_time_ms();
     end_time = get_time_ms();
     overhead_time = end_time - start_time;
+    int success = 1;
 
     start_time = get_time_ms();
-    int success = pair_files(left_file, right_file, opt);
+    if (opt->headersonly) {
+        int success = reformat_headers(left_file, right_file, opt);
+    } else{
+        int success = pair_files(left_file, right_file, opt);    
+    }
     end_time = get_time_ms();
     if (opt->verbose)
         printf ("Elapsed time = %lld (ms)\n", end_time - start_time - overhead_time);
@@ -88,6 +98,7 @@ void help(char *s) {
     fprintf(stdout, "\n%s [options] [fastq file 1] [fastq file 2]\n", s);
     fprintf(stdout, "\nOPTIONS\n");
     fprintf(stdout, "-f reformat sequence identifiers to minimal identifiers in both files (should not be used with -s option)\n");
+    fprintf(stdout, "-h Only reformat sequence identifiers to minimal identifiers in both files (do NOT perform deduplication at all)\n");
     fprintf(stdout, "-s do not split sequence IDs on spaces. See issue #14 for more details (should not be used with -f option)\n");
     fprintf(stdout, "-d remove duplicate sequences (based on the identifiers). Note that this will double the amount of memory required\n");
     fprintf(stdout, "-t table size (default 100003)\n");
