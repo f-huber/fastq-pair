@@ -199,14 +199,28 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
 
         char lastchar = line[strlen(line)-1];
         char lastbutone = line[strlen(line)-2];
+        // if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
+        //     if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
+        //         line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
+        //     }
+        // } else {
+        //     line[strlen(line)+1] = '\0';
+        //     line[strlen(line)-1] = '/';
+        // }
+
         if ('/' == lastbutone || '_' == lastbutone || '.' == lastbutone){
             if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
                 line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
             }
+        } else if (opt->splitspace){
+            size_t len = strlen(line);
+            line[len + 1] = '\0';
+            line[len] = '/';
         } else {
             line[strlen(line)+1] = '\0';
             line[strlen(line)-1] = '/';
         }
+
 
         if (opt->verbose)
             fprintf(stderr, "ID first file is |%s|\n", line);
@@ -380,6 +394,10 @@ int pair_files(char *left_fn, char *right_fn, struct options *opt) {
             if ('1' == lastchar || '2' == lastchar || 'f' == lastchar ||  'r' == lastchar){
                 line[strlen(line)-1] = '\0'; // Add the null terminator at the new end of the string
             }
+        } else if (opt->splitspace){
+            size_t len = strlen(line);
+            line[len + 1] = '\0';
+            line[len] = '/';
         } else {
             line[strlen(line)+1] = '\0';
             line[strlen(line)-1] = '/';
