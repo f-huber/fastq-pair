@@ -79,7 +79,7 @@ mamba create --name fastq-pair -c bioconda fastq-pair
 To install the code, grab the github repository, then make a build directory:
 ```$xslt
 mkdir build && cd build
-cmake3 ..
+cmake ..
 make && sudo make install
 ```
 There are more instructions on the [installation](INSTALLATION.md) page.

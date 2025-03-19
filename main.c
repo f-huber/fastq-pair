@@ -83,13 +83,12 @@ int main(int argc, char* argv[]) {
 
     start_time = get_time_ms();
     if (opt->headersonly) {
-        int success = reformat_headers(left_file, right_file, opt);
+        success = reformat_headers(left_file, right_file, opt);
     } else{
-        int success = pair_files(left_file, right_file, opt);    
+        success = pair_files(left_file, right_file, opt);    
     }
     end_time = get_time_ms();
-    if (opt->verbose)
-        printf ("Elapsed time = %lld (ms)\n", end_time - start_time - overhead_time);
+    printf ("Elapsed time = %lld (ms)\n", end_time - start_time - overhead_time);
 
     return success;
 }
